@@ -52,7 +52,6 @@ class Interpreter : Visitor<Any?>, Stmt.Visitor<Unit> {
     private fun execute(stmt: Stmt) = stmt.accept(this)
     override fun visitExpressionStmt(stmt: Stmt.Expression) = evaluate(stmt.expression).let { null }
     override fun visitVariableExpr(expr: Variable) = lookUpVariable(expr.name, expr)
-    override fun visitLetStmt(stmt: Stmt.Let) = environment.define(stmt.name.lexeme, evaluate(stmt.initializer))
     override fun visitLiteralExpr(expr: Literal): Any? = expr.value
     override fun visitGroupingExpr(expr: Grouping): Any? = evaluate(expr.expression)
     private fun evaluate(expr: Expr) = expr.accept<Any>(this)
@@ -60,8 +59,13 @@ class Interpreter : Visitor<Any?>, Stmt.Visitor<Unit> {
     override fun visitBlockStmt(stmt: Stmt.Block) = executeBlock(stmt.statements, Environment(environment))
     override fun visitWhileStmt(stmt: While) = run { while (isTruthy(evaluate(stmt.condition))) execute(stmt.body) }
 
-    override fun visitFunctionStmt(stmt: Stmt.Function) =
+    override fun visitFunctionStmt(stmt: Stmt.Function) {
         environment.define(stmt.name.lexeme, PartSFunction(stmt, environment))
+    }
+
+    override fun visitLetStmt(stmt: Stmt.Let) {
+        environment.define(stmt.name.lexeme, evaluate(stmt.initializer))
+    }
 
     override fun visitAssignExpr(expr: Assign): Any? {
         val value = evaluate(expr.value)
@@ -98,10 +102,11 @@ class Interpreter : Visitor<Any?>, Stmt.Visitor<Unit> {
         val left = evaluate(expr.left)
         val right = evaluate(expr.right)
 
-        when (expr.operator.type) {
-            "GREATER", "GREATER_EQUAL", "LESS", "LESS_EQUAL",
-            "MINUS", "STAR", "SLASH" -> checkNumberOperands(expr.operator, left!!, right!!)
-        }
+        if (expr.operator.type in listOf(
+                "GREATER", "GREATER_EQUAL", "LESS", "LESS_EQUAL",
+                "MINUS", "STAR", "SLASH"
+            )
+        ) checkNumberOperands(expr.operator, left, right)
 
         return when (expr.operator.type) {
             "GREATER" -> left as Double > right as Double

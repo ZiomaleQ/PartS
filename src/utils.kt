@@ -1,27 +1,18 @@
 import java.util.*
 
 class Token(val type: String, val lexeme: String, val literal: Any?, val line: Int) {
-    override fun toString(): String {
-        return "$type $lexeme $literal"
-    }
+    override fun toString(): String = "$type $lexeme $literal"
 }
 
 class RuntimeError(val token: Token, message: String?) : RuntimeException(message)
 class Return(val value: Any?) : RuntimeException(null, null, false, false)
-
-class Environment {
+class Environment(var enclosing: Environment? = null) {
     private val values: MutableMap<String, Any?> = mutableMapOf()
-    var enclosing: Environment? = null
 
-    constructor() {
-        enclosing = null
+    fun define(name: String, value: Any?): Environment {
+        values[name] = value
+        return this
     }
-
-    constructor(enclosing: Environment? = null) {
-        this.enclosing = enclosing
-    }
-
-    fun define(name: String, value: Any?) = run { values[name] = value }
 
     operator fun get(name: Token): Any? = when {
         values.containsKey(name.lexeme) -> values[name.lexeme]
@@ -41,23 +32,20 @@ class Environment {
     fun getAt(distance: Int, name: String?): Any? = ancestor(distance)?.values?.get(name)
 
 
-    private fun ancestor(distance: Int): Environment? {
-        var environment: Environment? = this
-        for (i in 0 until distance) environment = environment!!.enclosing
-        return environment
-    }
+    private fun ancestor(distance: Int): Environment? =
+        if (distance <= 0) this.enclosing else this.ancestor(distance - 1)
 
     fun assignAt(distance: Int, name: Token, value: Any?) {
         ancestor(distance)!!.values[name.lexeme] = value
     }
 }
 
-internal interface PartSCallable {
+interface PartSCallable {
     fun arity(): Int
     fun call(interpreter: Interpreter, arguments: List<Any?>): Any?
 }
 
-internal class PartSFunction(
+class PartSFunction(
     private val declaration: Stmt.Function,
     private val closure: Environment,
     private val isInitializer: Boolean = false
@@ -76,13 +64,11 @@ internal class PartSFunction(
         return if (isInitializer) closure.getAt(0, "this") else null
     }
 
-    fun bind(instance: PartSInstance?): PartSFunction = Environment(closure).let {
-        it.define("this", instance)
-        return PartSFunction(declaration, it, isInitializer)
-    }
+    fun bind(instance: PartSInstance?): PartSFunction =
+        PartSFunction(declaration, Environment(closure).define("this", instance), isInitializer)
 }
 
-internal class PartSClass(
+class PartSClass(
     val name: String,
     private val superclass: PartSClass?,
     private val methods: Map<String, PartSFunction>
@@ -97,24 +83,16 @@ internal class PartSClass(
 
     override fun arity(): Int = findMethod("init").let { it?.arity() ?: 0 }
 
-    fun findMethod(name: String): PartSFunction? {
-        return when {
-            methods.containsKey(name) -> methods[name]
-            superclass != null -> superclass.findMethod(name)
-            else -> null
-        }
-    }
+    fun findMethod(name: String): PartSFunction? = methods[name] ?: superclass?.findMethod(name)
 }
 
-internal class PartSInstance(private val klass: PartSClass) {
+class PartSInstance(private val `class`: PartSClass) {
     private val fields: MutableMap<String, Any> = HashMap()
-    override fun toString(): String {
-        return "${klass.name} instance"
-    }
+    override fun toString(): String = "${`class`.name} instance"
 
     operator fun get(name: Token): Any? {
-        if (fields.containsKey(name.lexeme)) return fields[name.lexeme]
-        klass.findMethod(name.lexeme)?.let { return it.bind(this) }
+        if (name.lexeme in fields) return fields[name.lexeme]
+        `class`.findMethod(name.lexeme)?.let { return it.bind(this) }
 
         throw RuntimeError(name, "Undefined property '${name.lexeme}'.")
     }
